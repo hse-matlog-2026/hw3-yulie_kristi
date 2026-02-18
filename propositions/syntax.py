@@ -51,17 +51,7 @@ def is_unary(string: str) -> bool:
 
 @lru_cache(maxsize=100) # Cache the return value of is_binary
 def is_binary(string: str) -> bool:
-    """Checks if the given string is a binary operator.
-
-    Parameters:
-        string: string to check.
-
-    Returns:
-        ``True`` if the given string is a binary operator, ``False`` otherwise.
-    """
-    return string == '&' or string == '|' or string == '->'
-    # For Chapter 3:
-    # return string in {'&', '|',  '->', '+', '<->', '-&', '-|'}
+    return string in {'&', '|', '->', '+', '<->', '-&', '-|'}
 
 @frozen
 class Formula:
@@ -221,16 +211,24 @@ class Formula:
             if remainder == '':
                 return None, 'Expected binary operator'
 
-            operator = None
-            max_op_length = min(3, len(remainder))
-            for length in range(max_op_length, 0, -1):
-                candidate = remainder[:length]
-                if is_binary(candidate):
-                    operator = candidate
-                    remainder = remainder[length:]
-                    break
-            if operator is None:
-                return None, 'Expected binary operator'
+            if remainder.startswith('<->'):
+                operator = '<->'
+                remainder = remainder[3:]
+            elif remainder.startswith('->'):
+                operator = '->'
+                remainder = remainder[2:]
+            elif remainder.startswith('-&'):
+                operator = '-&'
+                remainder = remainder[2:]
+            elif remainder.startswith('-|'):
+                operator = '-|'
+                remainder = remainder[2:]
+            else:
+                operator = remainder[0]
+                remainder = remainder[1:]
+
+            if not is_binary(operator):
+                return None, f'Unexpected operator: {operator}'
 
             second, remainder = Formula._parse_prefix(remainder)
             if second is None:
@@ -336,57 +334,48 @@ class Formula:
         assert formula is not None and remainder == ''
         return formula
 
-    def substitute_variables(self, substitution_map: Mapping[str, Formula]) -> \
-            Formula:
-        """Substitutes in the current formula, each variable name `v` that is a
-        key in `substitution_map` with the formula `substitution_map[v]`.
+    def substitute_variables(self, substitution_map: Mapping[str, Formula]) -> Formula:
+        for v in substitution_map:
+            assert is_variable(v)
 
-        Parameters:
-            substitution_map: mapping defining the substitutions to be
-                performed.
+        if is_variable(self.root):
+            return substitution_map.get(self.root, self)
 
-        Returns:
-            The formula resulting from performing all substitutions. Only
-            variable name occurrences originating in the current formula are
-            substituted (i.e., variable name occurrences originating in one of
-            the specified substitutions are not subjected to additional
-            substitutions).
+        if is_constant(self.root):
+            return self
 
-        Examples:
-            >>> Formula.parse('((p->p)|r)').substitute_variables(
-            ...     {'p': Formula.parse('(q&r)'), 'r': Formula.parse('p')})
-            (((q&r)->(q&r))|p)
-        """
-        for variable in substitution_map:
-            assert is_variable(variable)
-        # Task 3.3
+        if is_unary(self.root):
+            return Formula(self.root, self.first.substitute_variables(substitution_map))
 
-    def substitute_operators(self, substitution_map: Mapping[str, Formula]) -> \
-            Formula:
-        """Substitutes in the current formula, each constant or operator `op`
-        that is a key in `substitution_map` with the formula
-        `substitution_map[op]` applied to its (zero or one or two) operands,
-        where the first operand is used for every occurrence of ``'p'`` in the
-        formula and the second for every occurrence of ``'q'``.
+        return Formula(self.root,
+                           self.first.substitute_variables(substitution_map),
+                           self.second.substitute_variables(substitution_map))
 
-        Parameters:
-            substitution_map: mapping defining the substitutions to be
-                performed.
-
-        Returns:
-            The formula resulting from performing all substitutions. Only
-            operator occurrences originating in the current formula are
-            substituted (i.e., operator occurrences originating in one of the
-            specified substitutions are not subjected to additional
-            substitutions).
-
-        Examples:
-            >>> Formula.parse('((x&y)&~z)').substitute_operators(
-            ...     {'&': Formula.parse('~(~p|~q)')})
-            ~(~~(~x|~y)|~~z)
-        """
+    def substitute_operators(self, substitution_map: Mapping[str, Formula]) -> Formula:
         for operator in substitution_map:
-            assert is_constant(operator) or is_unary(operator) or \
-                   is_binary(operator)
+            assert is_constant(operator) or is_unary(operator) or is_binary(operator)
             assert substitution_map[operator].variables().issubset({'p', 'q'})
-        # Task 3.4
+
+        root = self.root
+
+        if is_variable(root):
+            return self
+
+        if is_constant(root):
+            if root in substitution_map:
+                return substitution_map[root]
+            return self
+
+        if is_unary(root):
+            new_first = self.first.substitute_operators(substitution_map)
+            if root in substitution_map:
+                schema = substitution_map[root]
+                return schema.substitute_variables({'p': new_first})
+            return Formula(root, new_first)
+
+        new_first = self.first.substitute_operators(substitution_map)
+        new_second = self.second.substitute_operators(substitution_map)
+        if root in substitution_map:
+            schema = substitution_map[root]
+            return schema.substitute_variables({'p': new_first, 'q': new_second})
+        return Formula(root, new_first, new_second)

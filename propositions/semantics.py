@@ -80,13 +80,13 @@ def evaluate(formula: Formula, model: Model) -> bool:
     if formula.root == '->':
         return (not first_value) or second_value
     if formula.root == '+':
-        return first_value != second_value
+        return (evaluate(formula.first, model) != evaluate(formula.second, model))
     if formula.root == '<->':
-        return first_value == second_value
+        return (evaluate(formula.first, model) == evaluate(formula.second, model))
     if formula.root == '-&':
-        return not (first_value and second_value)
+        return not (evaluate(formula.first, model) and evaluate(formula.second, model))
     if formula.root == '-|':
-        return not (first_value or second_value)
+        return not (evaluate(formula.first, model) or evaluate(formula.second, model))
     raise ValueError('Unknown operator: ' + formula.root)
 
 def all_models(variables: Sequence[str]) -> Iterable[Model]:
